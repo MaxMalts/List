@@ -43,17 +43,19 @@ void ListDump(list_t* list, const char* file, const int line, const char* functi
 	printf("\nInfo about a list from file: %s, function: %s, line: %d, reason: %s:\n", file, function, line, reason);
 	printf("list_t \"%s\" (%p):    (%s)\n", list->name, list, status);
 	printf("\tsecureVarBeg = %d\n", list->secureVarBeg);
-	printf("\tsize = %d\n\n", list->size);
+	printf("\tsize = %d\n", list->size);
+	printf("\tcurMaxSize = %d\n", list->curMaxSize);
+	printf("\tfree = %d\n\n", list->free);
 
 	char tempStr1[50] = "";
 	char tempStr2[50] = "";
 	char tempStr3[50] = "";
-	sprintf(tempStr1, "data[%d] (%p):", listMaxSize, &list->data);
-	sprintf(tempStr2, "next[%d] (%p):", listMaxSize, &list->next);
-	sprintf(tempStr3, "prev[%d] (%p):", listMaxSize, &list->prev);
+	sprintf(tempStr1, "data[%d] (%p):", list->curMaxSize + 1, &list->data);
+	sprintf(tempStr2, "next[%d] (%p):", list->curMaxSize + 1, &list->next);
+	sprintf(tempStr3, "prev[%d] (%p):", list->curMaxSize + 1, &list->prev);
 
 	printf("\t%-32s %-32s %-32s\n", tempStr1, tempStr2, tempStr3);
-	for (int i = 0; i < listMaxSize; i++) {
+	for (int i = 0; i <= list->curMaxSize; i++) {
 		char* elemStr = list_elem_tToStr(list->data[i]);
 		sprintf(tempStr1, "[%d] = %s,", i, elemStr);
 		sprintf(tempStr2, "[%d] = %d,", i, list->next[i]);
@@ -88,14 +90,27 @@ int CalcHash(list_t* list) {
 
 	int hash = 0;
 	for (int i = 0; i < sizeof(list_t); i++) {
-		char* curByteP = (char*)list + i;
+		char* tcurByteP = (char*)list + i;
 
-		if (curByteP == (char*)&list->hash) {
+		if (tcurByteP == (char*)&list->hash) {
 			i = i + sizeof(list->hash) - 1;
 			continue;
 		}
 
-		char curByte = *curByteP;
+		char curByte = *tcurByteP;
+		hash = hash ^ (curByte * 2 + hash / 2);
+	}
+
+	for (int i = 0; i <= list->curMaxSize * sizeof(list_elem_t); i++) {
+		char curByte = *((char*)list->data + i);
+		hash = hash ^ (curByte * 2 + hash / 2);
+	}
+	for (int i = 0; i <= list->curMaxSize * sizeof(int); i++) {
+		char curByte = *((char*)list->next + i);
+		hash = hash ^ (curByte * 2 + hash / 2);
+	}
+	for (int i = 0; i <= list->curMaxSize * sizeof(int); i++) {
+		char curByte = *((char*)list->prev + i);
 		hash = hash ^ (curByte * 2 + hash / 2);
 	}
 
@@ -123,7 +138,7 @@ int ListNextOk(list_t* list) {
 	int prevPos = 0;
 	int i = 0;
 	while (curPos != 0) {
-		if (curPos >= listMaxSize) {
+		if (curPos > list->curMaxSize) {
 			return 1;
 		}
 		if (curPos < 0) {
@@ -163,7 +178,7 @@ int ListPrevOk(list_t* list) {
 	int prevPos = 0;
 	int i = 0;
 	while (curPos != 0) {
-		if (curPos >= listMaxSize) {
+		if (curPos > list->curMaxSize) {
 			return 1;
 		}
 		if (curPos < 0) {
@@ -203,13 +218,13 @@ int ListFreeOk(list_t* list) {
 	int curPos = list->free;
 	int i = 0;
 	while (curPos != 0) {
-		if (curPos >= listMaxSize) {
+		if (curPos > list->curMaxSize) {
 			return 1;
 		}
 		if (curPos < 0) {
 			return 2;
 		}
-		if (i > listMaxSize) {
+		if (i > list->curMaxSize) {
 			return 3;
 		}
 		if (list->data[curPos] != list->emptyelem) {
@@ -232,11 +247,11 @@ int ListFreeOk(list_t* list) {
 *	@param[in] list Список
 *
 *	@return Если в разряде десятков:\n
-*1 - проблема в массиве next;\n
-*2 - проблема в массиве prev;\n
-*3 - проблема с свободными элементами.\n
-*В разряде единиц стоит конкретная ошибка. Ее значение см. в возращаемых значениях \
-функции ListNextOk, ListPrevOk или ListFreeOk в соответствии с разрядом десятков.
+ 1 - проблема в массиве next;\n
+ 2 - проблема в массиве prev;\n
+ 3 - проблема с свободными элементами.\n
+ В разряде единиц стоит конкретная ошибка. Ее значение см. в возращаемых значениях\
+ функции ListNextOk, ListPrevOk или ListFreeOk в соответствии с разрядом десятков.
 */
 
 int ListArraysOk(list_t* list) {
@@ -273,7 +288,7 @@ int ListArraysOk(list_t* list) {
 int ListOk(list_t* list) {
 	assert(list != NULL);
 
-	if (list->size > listMaxSize) {
+	if (list->size > list->curMaxSize) {
 		list->err = 1;
 		return 0;
 	}
@@ -349,26 +364,38 @@ int RecalcHash(list_t* list) {
 *	@return Указатель на созданный список
 */
 
-list_t ListConstructor(const char name[]) {
+list_t ListConstructor(const char* name) {
+	assert(name != NULL);
+
+	const int begMaxSize = 10;
+
 	list_t list = {};
+
 #ifdef _DEBUG
 	strcpy(list.name, name);
 	list.err = 0;
 #endif
 
+	list.data = (list_elem_t*)calloc(begMaxSize + 1, sizeof(list_elem_t));
+	list.next = (int*)calloc(begMaxSize + 1, sizeof(int));
+	list.prev = (int*)calloc(begMaxSize + 1, sizeof(int));
+	list.curMaxSize = begMaxSize;
+
 	list_elem_t emptyelem = list.emptyelem;
-	for (int i = 0; i < listMaxSize; i++) {
+	for (int i = 0; i <= begMaxSize; i++) {
 		list.data[i] = emptyelem;
 		list.prev[i] = -1;
 	}
 
 	list.next[0] = 0;
-	for (int i = 1; i < listMaxSize-1; i++) {
+	for (int i = 1; i <= list.curMaxSize - 1; i++) {
 		list.next[i] = i + 1;
 	}
-	list.next[listMaxSize - 1] = 0;
+	list.next[list.curMaxSize] = 0;
 
-
+	list.head = 0;
+	list.tail = 0;
+	list.free = 1;
 	list.size = 0;
 
 #ifdef _DEBUG
@@ -415,13 +442,80 @@ list_t ListConstructor(const char name[]) {
 //}
 
 
+/*  Не для пользователя
+*	Увеличивает размер списка
+*
+*	@param list Список
+*	@param[in] newSize Новый размер
+*
+*	@return 1 - новый размер меньше либо равен текущему; 2 - не удалось реаллоцировать;\
+ 0 - все прошло нормально
+*/
+
+int IncreaseList(list_t* list, int newSize) {
+	assert(list != NULL);
+	assert(newSize > 0);
+	assert(list->free > 0);
+	assert(list->next[list->free] == 0);
+	
+	if (newSize <= list->curMaxSize) {
+		return 1;
+	}
+
+	list_elem_t* newDataMem = (list_elem_t*)realloc(list->data, (newSize + 1) * sizeof(list_elem_t));
+	if (newDataMem == NULL) {
+		return 2;
+	}
+
+	int* newNextMem = (int*)realloc(list->next, (newSize + 1) * sizeof(int));
+	if (newNextMem == NULL) {
+		return 2;
+	}
+
+	int* newPrevMem = (int*)realloc(list->prev, (newSize + 1) * sizeof(int));
+	if (newPrevMem == NULL) {
+		return 2;
+	}
+
+	list->data = newDataMem;
+	list->next = newNextMem;
+	list->prev = newPrevMem;
+
+	list_elem_t emptyelem = list->emptyelem;
+	for (int i = list->curMaxSize + 1; i <= newSize; i++) {
+		list->data[i] = emptyelem;
+		list->prev[i] = -1;
+	}
+
+	for (int i = list->curMaxSize + 1; i <= newSize - 1; i++) {
+		list->next[i] = i + 1;
+	}
+	list->next[newSize] = 0;
+
+	list->next[list->free] = list->curMaxSize + 1;
+	list->curMaxSize = newSize;
+
+	return 0;
+
+#ifdef _DEBUG
+	RecalcHash(list);
+	if (ListOk(list)) {
+		PrintList_OK(*list);
+	}
+	else {
+		PrintList_NOK(*list);
+	}
+#endif
+}
+
+
 /**
 *	Вставляет элемент в начало списка
 *
 *	@param list Список
 *	@param[in] elem Элемент
 *
-*	@return Позиция, по которой вставился элемент; -1 - нет свободного места в списке; \
+*	@return Позиция, по которой вставился элемент; -1 - не удалось увеличить размер списка; \
 -2 - на вход подался список с ошибкой (только в режиме отладки)
 */
 
@@ -431,12 +525,14 @@ int InsertBeg(list_t* list, list_elem_t elem) {
 #ifdef _DEBUG
 	if (!ListOk(list)) {
 		PrintList_NOK(*list);
-		return -1;
+		return -2;
 	}
 #endif
 
-	if (list->size >= listMaxSize) {
-		return -1;
+	if (list->size == list->curMaxSize - 1) {
+		if (IncreaseList(list, list->curMaxSize * 2) != 0) {
+			return -1;
+		}
 	}
 
 	int newHead = list->free;
@@ -476,7 +572,7 @@ int InsertBeg(list_t* list, list_elem_t elem) {
 *	@param list Список
 *	@param[in] elem Элемент
 *
-*	@return Позиция, по которой вставился элемент; -1 - нет свободного места в списке; \
+*	@return Позиция, по которой вставился элемент; -1 - не удалось увеличить размер списка; \
 -2 - на вход подался список с ошибкой (только в режиме отладки)
 */
 
@@ -490,8 +586,10 @@ int InsertEnd(list_t* list, list_elem_t elem) {
 	}
 #endif
 
-	if (list->size >= listMaxSize) {
-		return -1;
+	if (list->size == list->curMaxSize - 1) {
+		if (IncreaseList(list, list->curMaxSize * 2) != 0) {
+			return -1;
+		}
 	}
 
 	int newTail = list->free;
@@ -527,7 +625,7 @@ int InsertEnd(list_t* list, list_elem_t elem) {
 *	@param[in] phIndex Позиция, после которой надо вставить элемент
 *	@param[in] elem Элемент
 *
-*	@return Позиция, по которой вставился элемент; -1 - нет свободного места в списке; \
+*	@return Позиция, по которой вставился элемент; -1 - не удалось увеличить размер списка; \
 -2 - на вход подался список с ошибкой (только в режиме отладки)
 */
 
@@ -542,8 +640,10 @@ int Insert(list_t* list, int phIndex, list_elem_t elem) {
 	}
 #endif
 
-	if (list->size >= listMaxSize) {
-		return -1;
+	if (list->size == list->curMaxSize - 1) {
+		if (IncreaseList(list, list->curMaxSize * 2) != 0) {
+			return -1;
+		}
 	}
 
 	int newPos = 0;
@@ -741,6 +841,7 @@ int Delete(list_t* list, int phIndex) {
 	return 0;
 }
 
+
 /**
 *	Удаляет список
 *
@@ -758,6 +859,8 @@ int ListDestructor(list_t* list) {
 		return 1;
 	}
 #endif
+
+	free(list->data);
 
 	return 0;
 }

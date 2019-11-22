@@ -8,8 +8,6 @@
 #define PrintList_NOK(list) ;
 #endif
 
-const int listMaxSize = 100;
-
 typedef int list_elem_t;
 
 #pragma pack(1)
@@ -18,14 +16,16 @@ struct list_t {
 	int secureVarBeg = 0;                    ///<Первая канарейка
 #endif
 
-	list_elem_t data[listMaxSize] = {};
-	int next[listMaxSize] = {};
-	int prev[listMaxSize] = {};
+	list_elem_t* data = {};
+	int* next = {};
+	int* prev = {};
 	int head = 0;
 	int tail = 0;
 	int free = 1;
 	list_elem_t emptyelem = -2147483647;    ///<Элемент, соответствующий пустому
 	int size = 0;
+	int curMaxSize = 0;
+	const int delta = 5;
 
 #ifdef _DEBUG
 	char name[30] = "";                      ///<Имя списка
@@ -46,7 +46,7 @@ struct list_t {
 
 
 
-list_t ListConstructor(const char name[]);
+list_t ListConstructor(const char name[] = "list");
 
 int InsertBeg(list_t* list, list_elem_t elem);
 
