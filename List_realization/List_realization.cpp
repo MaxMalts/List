@@ -36,7 +36,7 @@ char* list_elem_tToStr(list_elem_t elem) {
 #ifdef _DEBUG
 void ListDump(list_t* list, const char* file, const int line, const char* function, const char* reason) {
 	char status[10] = "ok";
-	if (list->err != 0) {
+	if (list->err != no_err) {
 		strcpy(status, "ERR");
 	}
 
@@ -289,23 +289,23 @@ int ListOk(list_t* list) {
 	assert(list != NULL);
 
 	if (list->size > list->curMaxSize) {
-		list->err = 1;
+		list->err = overflow;
 		return 0;
 	}
 	if (list->size < 0) {
-		list->err = 2;
+		list->err = underflow;
 		return 0;
 	}
 	if (list->secureVarBeg != 0) {
-		list->err = 3;
+		list->err = first_canary_spoiled;
 		return 0;
 	}
 	if (list->secureVarEnd != 0) {
-		list->err = 4;
+		list->err = second_canary_spoiled;
 		return 0;
 	}
 	if (list->hash != CalcHash(list)) {
-		list->err = 5;
+		list->err = invalid_hash;
 		return 0;
 	}
 
@@ -313,18 +313,18 @@ int ListOk(list_t* list) {
 	if (arrErr != 0) {
 		switch (arrErr / 10) {
 		case 0:
-			list->err = 6;
+			list->err = next_err;
 			return 0;
 		case 1:
-			list->err = 7;
+			list->err = prev_err;
 			return 0;
 		case 2:
-			list->err = 8;
+			list->err = free_err;
 			return 0;
 		}
 	}
 
-	list->err = 0;
+	list->err = no_err;
 	return 1;
 }
 #endif
@@ -373,7 +373,7 @@ list_t ListConstructor(const char* name) {
 
 #ifdef _DEBUG
 	strcpy(list.name, name);
-	list.err = 0;
+	list.err = no_err;
 #endif
 
 	list.data = (list_elem_t*)calloc(begMaxSize + 1, sizeof(list_elem_t));
